@@ -26,7 +26,7 @@ while True:
         'wait': 25,
     }).json()
 
-    for update in longPoll['updates']:
+    for update in longPoll.get('updates', []):
         if update['type'] == 'message_new':
             message = update['object']['message']['text']
             from_id = update['object']['message']['from_id']
