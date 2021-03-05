@@ -88,5 +88,5 @@ while True:
                                     f'\n' +
                                     f'{message}',
                         )
-
-    ts = longPoll['ts']
+    if longPoll.get('updates', None):
+        ts = longPoll['ts']
