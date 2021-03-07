@@ -8,40 +8,45 @@ from ldistance import is_appropriate_word
 from config import *
 
 
-def get_attachments(api: vk.api.API, raw_attachments: List[Dict], chat_id: int=0) -> str:
+def get_attachments(api: vk.api.API, raw_attachments: List[Dict], chat_id: int = 0) -> str:
     attachments = []
     for attachment in raw_attachments:
         t = attachment['type']
+
         if t == 'photo':
             url = max(attachment['photo']['sizes'], key=lambda x: x['height'])['url']
             upload_url = api.photos.getMessagesUploadServer()['upload_url']
             open('tmp.jpg', 'wb').write(get(url, allow_redirects=True).content)
             file = {'photo': open('tmp.jpg', 'rb')}
+
             response = json.loads(post(upload_url, files=file).text)
             server = response['server']
             photo = response['photo']
             hash = response['hash']
+
             response = api.photos.saveMessagesPhoto(photo=photo, hash=hash, server=server)
             attachments.append(
                 f'photo{response[0]["owner_id"]}_{response[0]["id"]}_{response[0]["access_key"]}'
             )
+
         elif t == 'doc':
-            print(attachment)
             url = attachment['doc']['url']
             upload_url = api.docs.getMessagesUploadServer(peer_id=chat_id)['upload_url']
-            open('tmp.' + attachment['doc']['title'].split('.')[1], 'wb').write(get(url, allow_redirects=True).content)
-            file = {'file': open('tmp.' + attachment['doc']['title'].split('.')[1], 'rb')}
+            doc_format = attachment['doc']['title'].split('.')[1]
+            open('tmp.' + doc_format, 'wb').write(get(url, allow_redirects=True).content)
+            file = {'file': open('tmp.' + doc_format, 'rb')}
+
             response = json.loads(post(upload_url, files=file).text)
-            print(response)
             f = response['file']
             title = attachment['doc']['title']
+
             response = api.docs.save(file=f, title=title)
-            print(response)
             attachments.append(
                 f'doc{response["doc"]["owner_id"]}_{response["doc"]["id"]}'
             )
 
     return ','.join(attachments)
+
 
 bad_words = []
 f = open('badwords.txt', 'r', encoding='utf-8')
@@ -69,7 +74,6 @@ while True:
             from_id = update['object']['message']['from_id']
             peer_id = update['object']['message']['peer_id']
             raw_attachments = update['object']['message']['attachments']
-            message_id = update['object']['message']['conversation_message_id']
             api.messages.markAsRead(peer_id=from_id)
 
             if peer_id != CHAT_ID_REPORT and peer_id != CHAT_ID_QUESTIONS:
