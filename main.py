@@ -1,59 +1,15 @@
-from requests import post, get
+from requests import post
 from time import time
-import json
 import re
-from typing import *
 import vk
 from ldistance import is_appropriate_word
 from config import *
-
-
-def get_attachments(api: vk.api.API, raw_attachments: List[Dict], chat_id: int = 0) -> str:
-    attachments = []
-    for attachment in raw_attachments:
-        t = attachment['type']
-
-        if t == 'photo':
-            url = max(attachment['photo']['sizes'], key=lambda x: x['height'])['url']
-            upload_url = api.photos.getMessagesUploadServer()['upload_url']
-            open('tmp.jpg', 'wb').write(get(url, allow_redirects=True).content)
-            file = {'photo': open('tmp.jpg', 'rb')}
-
-            response = json.loads(post(upload_url, files=file).text)
-            server = response['server']
-            photo = response['photo']
-            hash = response['hash']
-
-            response = api.photos.saveMessagesPhoto(photo=photo, hash=hash, server=server)
-            attachments.append(
-                f'photo{response[0]["owner_id"]}_{response[0]["id"]}_{response[0]["access_key"]}'
-            )
-
-        elif t == 'doc':
-            url = attachment['doc']['url']
-            upload_url = api.docs.getMessagesUploadServer(peer_id=chat_id)['upload_url']
-            doc_format = attachment['doc']['title'].split('.')[1]
-            open('tmp.' + doc_format, 'wb').write(get(url, allow_redirects=True).content)
-            file = {'file': open('tmp.' + doc_format, 'rb')}
-
-            response = json.loads(post(upload_url, files=file).text)
-            f = response['file']
-            title = attachment['doc']['title']
-
-            response = api.docs.save(file=f, title=title)
-            attachments.append(
-                f'doc{response["doc"]["owner_id"]}_{response["doc"]["id"]}'
-            )
-
-    return ','.join(attachments)
 
 
 bad_words = []
 f = open('badwords.txt', 'r', encoding='utf-8')
 for bad_word in f:
     bad_words.append(bad_word.strip().lower())
-
-questions = []
 
 session = vk.Session(access_token=VK_TOKEN)
 api = vk.API(session, v=VK_VERSION)
@@ -73,29 +29,29 @@ while True:
             message = update['object']['message']['text']
             from_id = update['object']['message']['from_id']
             peer_id = update['object']['message']['peer_id']
-            raw_attachments = update['object']['message']['attachments']
-            api.messages.markAsRead(peer_id=from_id)
+            api.messages.markAsRead(peer_id=peer_id, mark_conversation_as_read=1)
 
             if peer_id != CHAT_ID_REPORT and peer_id != CHAT_ID_QUESTIONS:
                 for word in message.lower().split():
                     for bad_word in bad_words:
                         if is_appropriate_word(word, bad_word):
-                            api.messages.send(
-                                random_id=int(time() * 1000),
-                                peer_id=peer_id,
-                                message=f'@id{from_id}, пожалуйста, давай не будем употреблять эти слова.',
-                            )
-
-                            response = api.messages.getConversationsById(peer_ids=peer_id)
+                            response = api.messages.getConversationsById(peer_ids=CHAT_ID)
                             title = response['items'][0]['chat_settings']['title']
 
+                            message_id = api.messages.getHistory(peer_id=CHAT_ID, count=1)['items'][0]['id']
                             api.messages.send(
                                 random_id=int(time() * 1000),
                                 peer_id=CHAT_ID_REPORT,
                                 message=f'Название беседы: {title}\n' +
                                         f'Пользователь: @id{from_id}\n' +
                                         f'Текст: {message}\n',
-                                attachment=get_attachments(api, raw_attachments, CHAT_ID_REPORT)
+                                forward_messages=message_id
+                            )
+
+                            api.messages.send(
+                                random_id=int(time() * 1000),
+                                peer_id=CHAT_ID,
+                                message=f'@id{from_id}, пожалуйста, давай не будем употреблять эти слова.'
                             )
 
                             break
@@ -103,35 +59,31 @@ while True:
                 ref = re.match(f'\[{BOT_NAME}\|\w+\]', message)
                 if ref:
                     message = message.replace(ref.group(0), "").strip()
+                    message_id = api.messages.getHistory(peer_id=CHAT_ID, count=1)['items'][0]['id']
                     api.messages.send(
                         random_id=int(time() * 1000),
                         peer_id=CHAT_ID_QUESTIONS,
-                        message=f'{message}',
-                        attachment=get_attachments(api, raw_attachments, CHAT_ID_QUESTIONS)
+                        message='',
+                        forward_messages=message_id
                     )
-                    questions.append((peer_id, from_id, message))
 
             elif peer_id == CHAT_ID_QUESTIONS:
                 fwd_message = update['object']['message']['fwd_messages']
                 reply_message = update['object']['message'].get('reply_message', None)
-                if reply_message is not None:
-                    fwd = reply_message['text']
-                elif len(fwd_message) == 1:
-                    fwd = fwd_message[0]['text']
+
+                if reply_message is not None and len(reply_message['fwd_messages']) == 1:
+                    to_id = reply_message['fwd_messages'][0]['from_id']
+                elif len(fwd_message) == 1 and len(fwd_message[0]['fwd_messages']) == 1:
+                    to_id = fwd_message[0]['fwd_messages'][0]['from_id']
                 else:
                     continue
 
-                for question in questions:
-                    if question[2] == fwd:
-                        peer_id = question[0]
-                        to_id = question[1]
-                        api.messages.send(
-                            random_id=int(time() * 1000),
-                            peer_id=peer_id,
-                            message=f'Ответ на вопрос для @id{to_id}:\n' +
-                                    f'\n' +
-                                    f'{message}',
-                            attachment=get_attachments(api, raw_attachments, peer_id)
-                        )
+                message_id = api.messages.getHistory(peer_id=CHAT_ID_QUESTIONS, count=1)['items'][0]['id']
+                api.messages.send(
+                    random_id=int(time() * 1000),
+                    peer_id=CHAT_ID,
+                    message=f'Поступил ответ на ваш вопрос @id{to_id}',
+                    forward_messages=message_id
+                )
     if longPoll.get('updates', None):
         ts = longPoll['ts']
